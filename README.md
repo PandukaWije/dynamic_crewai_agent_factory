@@ -37,10 +37,15 @@ source venv/bin/activate  # On Windows, use: venv\Scripts\activate
 ```bash
 pip install crewai 'crewai[tools]' exa_py langchain-openai
 ```
+or 
+
+```bash
+pip install -r requirements.txt
+```
 
 ### 4. Set up environment variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (using `.env.sample`) :
 
 ```
 OPENAI_API_KEY=your_openai_api_key
@@ -153,4 +158,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
-Made with ❤️ using [CrewAI](https://github.com/joaomdmoura/crewAI)
+Made with ❤️ 
