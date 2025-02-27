@@ -1,9 +1,10 @@
 from crewai import Agent, Task, Crew, Process
-# Fix this import line in dynamic_crew.py
 from crewai_tools import WebsiteSearchTool, FileReadTool
-from crewai.tools import tool  # Correct import for the tool decorator
+from crewai.tools import tool
 from exa_py import Exa
 import os
+import re
+import json
 from typing import List, Dict, Any, Optional
 from langchain_openai import ChatOpenAI
 
@@ -53,7 +54,10 @@ class PromptAnalyzer:
         4. The execution process (sequential or hierarchical)
         
         Available tools: ExaSearchTool (advanced semantic web search), WebsiteSearchTool (website content extraction), 
-        FileReadTool (file reading), and any others that would be useful.
+        FileReadTool (file reading)
+        
+        IMPORTANT: Do NOT include placeholder variables like {tool_name} in task descriptions.
+        Instead write plain text instructions like "Use search tools to gather information".
         
         Return ONLY valid JSON with this structure:
         {
@@ -62,12 +66,12 @@ class PromptAnalyzer:
                     "role": "Role name",
                     "goal": "Agent's goal",
                     "backstory": "Brief backstory",
-                    "tools": ["ToolName1", "ToolName2"]
+                    "tools": ["ExaSearchTool", "WebsiteSearchTool", "FileReadTool"]
                 }
             ],
             "tasks": [
                 {
-                    "description": "Task description with placeholders for inputs like {variable}",
+                    "description": "Task description in plain text without placeholders",
                     "expected_output": "Expected output description",
                     "agent_role": "Which agent performs this"
                 }
@@ -82,19 +86,67 @@ class PromptAnalyzer:
         ]
         
         response = self.llm.invoke(messages)
-        import json
-        return json.loads(response.content)
+        content = response.content
+        
+        # Clean up common formatting issues
+        content = content.strip()
+        
+        # Remove code blocks if present
+        if "```json" in content:
+            content = content.replace("```json", "", 1)
+        if "```" in content:
+            content = content.replace("```", "")
+        
+        # Try to extract JSON using regex if we still have issues
+        json_match = re.search(r'({[\s\S]*})', content)
+        if json_match:
+            content = json_match.group(1)
+            
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON: {e}")
+            print(f"Content: {content}")
+            # Fall back to a minimal valid structure
+            return {
+                "agents": [
+                    {
+                        "role": "Researcher",
+                        "goal": "Research information related to the task",
+                        "backstory": "Expert researcher with analytical skills",
+                        "tools": ["ExaSearchTool"]
+                    },
+                    {
+                        "role": "Writer",
+                        "goal": "Create content based on research findings",
+                        "backstory": "Expert writer skilled at creating engaging content",
+                        "tools": []
+                    }
+                ],
+                "tasks": [
+                    {
+                        "description": f"Research information about: {prompt}",
+                        "expected_output": "Comprehensive research findings",
+                        "agent_role": "Researcher"
+                    },
+                    {
+                        "description": f"Create content about: {prompt} based on the research",
+                        "expected_output": "Engaging and informative content",
+                        "agent_role": "Writer"
+                    }
+                ],
+                "process": "sequential"
+            }
 
 class AgentFactory:
     """Creates appropriate CrewAI agents based on specifications."""
     
     def __init__(self):
-        # Available tools mapping
+        # Simplified tools map with only the tools we have
         self.tools_map = {
             "ExaSearchTool": exa_search_tool,
             "WebsiteSearchTool": WebsiteSearchTool(),
             "FileReadTool": FileReadTool(),
-            # Add more tools as needed
         }
     
     def create_agents(self, agent_specs: List[Dict]) -> Dict[str, Agent]:
@@ -111,6 +163,8 @@ class AgentFactory:
                 for tool_name in spec["tools"]:
                     if tool_name in self.tools_map:
                         tools.append(self.tools_map[tool_name])
+                    else:
+                        print(f"Warning: Tool '{tool_name}' not found, skipping")
             
             # Create agent
             agent = Agent(
@@ -137,9 +191,14 @@ class TaskFactory:
             if agent_role not in agents:
                 raise ValueError(f"Agent with role '{agent_role}' not found for task")
             
+            # Clean the description to remove any template variables
+            description = spec["description"]
+            # Remove any {variable} placeholders that might cause template errors
+            cleaned_description = re.sub(r'{[^}]*}', '', description)
+            
             # Create task
             task = Task(
-                description=spec["description"],
+                description=cleaned_description,
                 expected_output=spec["expected_output"],
                 agent=agents[agent_role]
             )
@@ -178,7 +237,7 @@ class DynamicCrewSystem:
         """Process user prompt and execute the dynamically created crew."""
         # Get team design from prompt
         team_design = self.prompt_analyzer.analyze(prompt)
-        print(f"Generated team design: {team_design}")
+        print(f"Generated team design: {json.dumps(team_design, indent=2)}")
         
         # Create agents
         agents = self.agent_factory.create_agents(team_design["agents"])
